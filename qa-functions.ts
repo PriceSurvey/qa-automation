@@ -58,11 +58,11 @@ function canApproveItem(evaluationItem: any) {
   const eanAswered = evaluationItem.data_info_before.answers.find((answer: any) =>
     answer.question_key.includes("barras")
   );
-  // if (evaluationItem.customer_id !== 133) return false;
+  if (evaluationItem.customer_id !== 133) return false;
   if (evaluationItem.status !== 3) return false;
-  // if (!eanAswered || !evaluationItem.product_info?.ean) return false;
-  // if (evaluationItem.pricer_email !== "isac@pricesurvey.io") return false; // pricesurvey@pricesurvey.io
-  // if (evaluationItem.product_info.ean?.toString() === eanAswered?.toString()) return true;
+  if (!eanAswered || !evaluationItem.product_info?.ean) return false;
+  if (evaluationItem.pricer_email !== "pricesurvey@pricesurvey.io") return false;
+  if (evaluationItem.product_info.ean?.toString() === eanAswered?.toString()) return true;
 
   return true;
 }
