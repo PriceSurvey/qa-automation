@@ -1,6 +1,7 @@
 import axios from "axios";
 import { sendMessageToSlackChannel } from "./slack-notifications";
 import { chunk } from "lodash";
+import { CrawlerState, db } from "./db";
 
 const client = axios.create({
   baseURL: process.env.BASE_API_URL,
@@ -9,7 +10,7 @@ const client = axios.create({
   },
 });
 
-const slackChannel = process.env.ENVIRONMENT === "development" ? "test-n8n" : "projeto-gpa";
+const slackChannel = process.env.ENVIRONMENT === "development" ? "test-n8n" : "automacao-gpa";
 
 async function getActiveLists() {
   const response = await client.get(
@@ -69,16 +70,7 @@ function canApproveItem(evaluationItem: any) {
   return true;
 }
 
-async function startEvaluation() {
-  /**
-   * Steps:
-   * 1. Get active lists
-   * 2. For every active list
-   *  2.1 Get evaluation items
-   *  2.2 For every evaluation item
-   *    2.2.1 Get evaluation item details
-   *    2.2.2 Evaluate item
-   */
+async function evaluateItems() {
   await sendMessageToSlackChannel(
     slackChannel,
     `${new Date().toISOString()}\n🤖 Iniciando a avaliação automática de itens para pesquisas internas de GPA.`
@@ -115,7 +107,6 @@ async function startEvaluation() {
     await Promise.allSettled(
       listChunk.map(async (list: any) => {
         console.log(`Evaluating list ${list.id}`);
-        // await sendMessageToSlackChannel(slackChannel, `🤖 Iniciando a avaliação da lista ${list.id}.`);
         const { items } = await getEvaluationItems(list.id);
         console.log(`Evaluating ${items?.length} items`);
 
@@ -135,52 +126,43 @@ async function startEvaluation() {
             })
           );
         }
-        // for (const evaluationItem of items) {
-        //   const evaluationItemDetails = await getEvaluationItemDetails(evaluationItem.id);
-        //   const evaluatedItem = await approveItem(evaluationItemDetails);
-        //   if (evaluatedItem) {
-        //     console.log(`Evaluated item ${evaluatedItem.id}.`);
-        //   }
-        //   evaluatedItemsCount++;
-        //   // await new Promise((resolve) => setTimeout(resolve, 15_000));
-        // }
       })
     );
   }
   clearInterval(intervalRef);
-  // for (const list of activeLists) {
-  //   let evaluatedItemsCount = 0;
-  //   console.log(`Evaluating list ${list.id}`);
-  //   await sendMessageToSlackChannel(slackChannel, `🤖 Iniciando a avaliação da lista ${list.id}.`);
-  //   const { items } = await getEvaluationItems(list.id);
-  //   console.log(`Evaluating ${items?.length} items`);
-
-  //   const intervalRef = setInterval(async () => {
-  //     // NOTE: It takes between 5-10s for the message to be sent to Slack, so the interval
-  //     // should consider it.
-  //     await sendMessageToSlackChannel(
-  //       slackChannel,
-  //       `🤖 Já foram avaliados ${evaluatedItemsCount}/${items.length} itens (${Math.round(
-  //         (evaluatedItemsCount / items.length) * 100
-  //       )}%).`
-  //     );
-  //   }, 7_000);
-
-  //   for (const evaluationItem of items) {
-  //     const evaluationItemDetails = await getEvaluationItemDetails(evaluationItem.id);
-  //     const evaluatedItem = await approveItem(evaluationItemDetails);
-  //     if (evaluatedItem) {
-  //       console.log(`Evaluated item ${evaluatedItem.id}.`);
-  //     }
-  //     evaluatedItemsCount++;
-  //     // await new Promise((resolve) => setTimeout(resolve, 15_000));
-  //   }
-  //   clearInterval(intervalRef);
-  // }
   await sendMessageToSlackChannel(
     slackChannel,
     `${new Date().toISOString()}\n🤖 Todas as listas atribuídas para mim foram avaliadas.`
   );
+}
+
+async function startEvaluation(force: boolean = false) {
+  /**
+   * Steps:
+   * 1. Get active lists
+   * 2. For every active list
+   *  2.1 Get evaluation items
+   *  2.2 For every evaluation item
+   *    2.2.1 Get evaluation item details
+   *    2.2.2 Evaluate item
+   */
+  const crawlerState = await db.getObjectDefault<CrawlerState>("/crawlerState", CrawlerState.NOT_RUNNING);
+  console.log("🤖 Crawler state: ", crawlerState);
+  console.log("🤖 Should force: ", force);
+  if (crawlerState === "RUNNING" && !force) {
+    console.log("🤖 Crawler is already running.");
+    await sendMessageToSlackChannel(
+      slackChannel,
+      `${new Date().toISOString()}\n🤖 Já estou avaliando itens para pesquisas internas de GPA.`
+    );
+  } else {
+    await db.push("/crawlerState", CrawlerState.RUNNING);
+    try {
+      await evaluateItems();
+    } finally {
+      await db.push("/crawlerState", CrawlerState.NOT_RUNNING);
+    }
+  }
 }
 
 export { startEvaluation };
