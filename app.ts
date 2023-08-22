@@ -1,11 +1,31 @@
 import express from "express";
+import { startEvaluation } from "./qa-functions";
 const app = express();
 const port = process.env.PORT || 3001;
 
-app.get("/", (req, res) => res.type('html').send(html));
+app.get("/health", (req, res) => {
+  res.send("OK");
+});
+
+app.get("/", (req, res) => {
+  res.send({
+    botToken: process.env.BOT_TOKEN,
+    evaluatorId: process.env.EVALUATOR_ID,
+  });
+});
+app.get("/start-evaluation", async (req, res) => {
+  try {
+    await startEvaluation();
+    res.send("OK");
+  } catch (e) {
+    console.log("err: ", e);
+    res.send(e);
+  }
+});
+
+// https://dev.pricesurvey.io/api/qa/v0/evaluation-list/?current_evaluator_id=6641500&isFinished=false
 
 app.listen(port, () => console.log(`Example app listening on port ${port}!`));
-
 
 const html = `
 <!DOCTYPE html>
@@ -56,4 +76,4 @@ const html = `
     </section>
   </body>
 </html>
-`
+`;
