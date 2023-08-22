@@ -60,9 +60,9 @@ function canApproveItem(evaluationItem: any) {
   );
   if (evaluationItem.customer_id !== 133) return false;
   if (evaluationItem.status !== 3) return false;
-  if (!eanAswered || !evaluationItem.product_info?.ean) return false;
   if (evaluationItem.pricer_email !== "pricesurvey@pricesurvey.io") return false;
-  if (evaluationItem.product_info.ean?.toString() === eanAswered?.toString()) return true;
+  if (eanAswered && evaluationItem.product_info?.ean)
+    return evaluationItem.product_info.ean?.toString() === eanAswered?.toString();
 
   return true;
 }
