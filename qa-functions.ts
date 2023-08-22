@@ -2,7 +2,7 @@ import axios from "axios";
 import { sendMessageToSlackChannel } from "./slack-notifications";
 
 const client = axios.create({
-  baseURL: "https://dev.pricesurvey.io/api/qa/v0",
+  baseURL: process.env.BASE_API_URL,
   headers: {
     Authorization: `Token ${process.env.BOT_TOKEN}`,
   },
@@ -12,7 +12,7 @@ const slackChannel = "projeto-gpa";
 
 async function getActiveLists() {
   const response = await client.get(
-    `https://dev.pricesurvey.io/api/qa/v0/evaluation-list/?isFinished=false&current_evaluator_id=${process.env.EVALUATOR_ID}`
+    `${process.env.BASE_API_URL}/evaluation-list/?isFinished=false&current_evaluator_id=${process.env.EVALUATOR_ID}`
   );
   return response.data;
 }
