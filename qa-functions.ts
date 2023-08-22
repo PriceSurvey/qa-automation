@@ -1,5 +1,6 @@
 import axios from "axios";
 import { sendMessageToSlackChannel } from "./slack-notifications";
+import { chunk } from "lodash";
 
 const client = axios.create({
   baseURL: process.env.BASE_API_URL,
@@ -8,7 +9,7 @@ const client = axios.create({
   },
 });
 
-const slackChannel = "projeto-gpa";
+const slackChannel = process.env.ENVIRONMENT === "development" ? "test-n8n" : "projeto-gpa";
 
 async function getActiveLists() {
   const response = await client.get(
@@ -51,6 +52,7 @@ async function approveItem(evaluationItem: any) {
     });
   } else {
     console.log("Can't approve item: ", evaluationItem.id);
+    return null;
   }
 }
 
@@ -91,35 +93,90 @@ async function startEvaluation() {
     slackChannel,
     activeLists.length ? listMessage : "🤖 Não existem listas para avaliar."
   );
-  for (const list of activeLists) {
-    let evaluatedItemsCount = 0;
-    console.log(`Evaluating list ${list.id}`);
-    await sendMessageToSlackChannel(slackChannel, `🤖 Iniciando a avaliação da lista ${list.id}.`);
-    const { items } = await getEvaluationItems(list.id);
-    console.log(`Evaluating ${items?.length} items`);
 
-    const intervalRef = setInterval(async () => {
-      // NOTE: It takes between 5-10s for the message to be sent to Slack, so the interval
-      // should consider it.
-      await sendMessageToSlackChannel(
-        slackChannel,
-        `🤖 Já foram avaliados ${evaluatedItemsCount}/${items.length} itens (${Math.round(
-          (evaluatedItemsCount / items.length) * 100
-        )}%).`
-      );
-    }, 7_000);
+  const listChunks = chunk(activeLists, 2);
+  const evaluated = new Set();
+  const notEvaluated = new Set();
 
-    for (const evaluationItem of items) {
-      const evaluationItemDetails = await getEvaluationItemDetails(evaluationItem.id);
-      const evaluatedItem = await approveItem(evaluationItemDetails);
-      if (evaluatedItem) {
-        console.log(`Evaluated item ${evaluatedItem.id}.`);
-      }
-      evaluatedItemsCount++;
-      // await new Promise((resolve) => setTimeout(resolve, 15_000));
-    }
-    clearInterval(intervalRef);
+  const intervalRef = setInterval(async () => {
+    // NOTE: It takes between 5-10s for the message to be sent to Slack, so the interval
+    // should consider it.
+    await sendMessageToSlackChannel(
+      slackChannel,
+      `🤖 *Progresso*:
+    - Já foram avaliados ${evaluated.size + notEvaluated.size} itens
+    - Itens que foram aprovados: ${evaluated.size}
+    - Itens que não puderam ser aprovados: ${notEvaluated.size}
+    `
+    );
+  }, 3_000);
+
+  for (const listChunk of listChunks) {
+    await Promise.allSettled(
+      listChunk.map(async (list: any) => {
+        console.log(`Evaluating list ${list.id}`);
+        // await sendMessageToSlackChannel(slackChannel, `🤖 Iniciando a avaliação da lista ${list.id}.`);
+        const { items } = await getEvaluationItems(list.id);
+        console.log(`Evaluating ${items?.length} items`);
+
+        const itemsChunks: any[] = chunk(items as any[], 5);
+        for (const itemChunk of itemsChunks) {
+          await Promise.allSettled(
+            itemChunk.map(async (evaluationItem: any) => {
+              const evaluationItemDetails = await getEvaluationItemDetails(evaluationItem.id);
+              const evaluatedItem = await approveItem(evaluationItemDetails);
+              if (evaluatedItem) {
+                console.log(`Evaluated item ${evaluatedItem.id}.`);
+                evaluated.add(evaluationItem.id);
+              } else {
+                notEvaluated.add(evaluationItem.id);
+              }
+              await new Promise((resolve) => setTimeout(resolve, 300));
+            })
+          );
+        }
+        // for (const evaluationItem of items) {
+        //   const evaluationItemDetails = await getEvaluationItemDetails(evaluationItem.id);
+        //   const evaluatedItem = await approveItem(evaluationItemDetails);
+        //   if (evaluatedItem) {
+        //     console.log(`Evaluated item ${evaluatedItem.id}.`);
+        //   }
+        //   evaluatedItemsCount++;
+        //   // await new Promise((resolve) => setTimeout(resolve, 15_000));
+        // }
+      })
+    );
   }
+  clearInterval(intervalRef);
+  // for (const list of activeLists) {
+  //   let evaluatedItemsCount = 0;
+  //   console.log(`Evaluating list ${list.id}`);
+  //   await sendMessageToSlackChannel(slackChannel, `🤖 Iniciando a avaliação da lista ${list.id}.`);
+  //   const { items } = await getEvaluationItems(list.id);
+  //   console.log(`Evaluating ${items?.length} items`);
+
+  //   const intervalRef = setInterval(async () => {
+  //     // NOTE: It takes between 5-10s for the message to be sent to Slack, so the interval
+  //     // should consider it.
+  //     await sendMessageToSlackChannel(
+  //       slackChannel,
+  //       `🤖 Já foram avaliados ${evaluatedItemsCount}/${items.length} itens (${Math.round(
+  //         (evaluatedItemsCount / items.length) * 100
+  //       )}%).`
+  //     );
+  //   }, 7_000);
+
+  //   for (const evaluationItem of items) {
+  //     const evaluationItemDetails = await getEvaluationItemDetails(evaluationItem.id);
+  //     const evaluatedItem = await approveItem(evaluationItemDetails);
+  //     if (evaluatedItem) {
+  //       console.log(`Evaluated item ${evaluatedItem.id}.`);
+  //     }
+  //     evaluatedItemsCount++;
+  //     // await new Promise((resolve) => setTimeout(resolve, 15_000));
+  //   }
+  //   clearInterval(intervalRef);
+  // }
   await sendMessageToSlackChannel(
     slackChannel,
     `${new Date().toISOString()}\n🤖 Todas as listas atribuídas para mim foram avaliadas.`

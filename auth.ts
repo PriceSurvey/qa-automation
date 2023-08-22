@@ -1,4 +1,7 @@
 export const isAuth = (req: any, res: any, next: any) => {
+  if (process.env.ENVIROMENT === "development") {
+    return next();
+  }
   const auth = req.headers.authorization;
   if (auth === process.env.TOKEN) {
     next();
