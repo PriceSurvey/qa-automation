@@ -21,7 +21,7 @@ app.get("/", isAuth, (req, res) => {
 app.post("/start-evaluation", isAuth, async (req, res) => {
   try {
     const { force } = req.body;
-    await startEvaluation(force);
+    startEvaluation(force);
     res.send("OK");
   } catch (e) {
     console.log("err: ", e);
