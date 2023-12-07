@@ -96,7 +96,8 @@ function canApproveItem(evaluationItem: any) {
   const eanAswered = evaluationItem.data_info_before.answers.find((answer: any) =>
     answer.question_key.includes("barcode")
   );
-  if (evaluationItem.customer_id !== 133) return { error: "WRONG_CUSTOMER", canApprove: false };
+  const customerIds = [133, 175];
+  if (!customerIds.includes(evaluationItem.customer_id)) return { error: "WRONG_CUSTOMER", canApprove: false };
   if (evaluationItem.status !== 3)
     return {
       error: "WRONG_ITEM_STATUS",
@@ -129,9 +130,12 @@ async function approveBulk(evaluationItems: any[], retryCount: number = 0): Prom
     console.log("items length: ", items.length);
 
     console.log("Finished getting detailed items");
-    const payload = items.map((item: any) => {
-      return formatEvaluationItem(item);
-    });
+    const payload = items
+      .filter((item: any) => canApproveItem(item).canApprove)
+      .map((item: any) => {
+        return formatEvaluationItem(item);
+      });
+    console.log(`payload allowed to be approved: ${payload.length}`);
     const response = await client.patch(`/evaluation-item/bulk-update/`, payload);
     console.log("response: ", response.data?.length);
     return response.data;
@@ -174,7 +178,7 @@ async function evaluateItems() {
   //   );
   // }, 10_000);
 
-  const listChunks = chunk(activeLists, 4);
+  const listChunks = chunk(activeLists, 8);
   for (const listChunk of listChunks) {
     await Promise.allSettled(
       listChunk.map(async (list: any) => {
