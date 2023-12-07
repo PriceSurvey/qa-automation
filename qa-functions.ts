@@ -57,6 +57,21 @@ async function evaluateItem(evaluationItem: any, evaluation: any, retryCount: nu
 }
 async function releaseEvaluationList(listId: string) {}
 
+function formatEvaluationItem(evaluationItem: any) {
+  return {
+    id: evaluationItem.id,
+    score: 5,
+    approved: true,
+    evaluated: true,
+    data_info_after: {
+      answers: evaluationItem.data_info_before.answers.map((a: any) => ({
+        survey_question: a.survey_question,
+        value: a.value === "" || a.value === undefined ? null : a.value,
+      })),
+    },
+  };
+}
+
 async function approveItem(evaluationItem: any) {
   const validate = canApproveItem(evaluationItem);
   if (validate.canApprove) {
@@ -106,6 +121,27 @@ function canApproveItem(evaluationItem: any) {
   return { canApprove: true };
 }
 
+async function approveBulk(evaluationItems: any[], retryCount: number = 0): Promise<any> {
+  try {
+    console.log("approveBulk started");
+    const ids = evaluationItems.map((item: any) => item.id);
+    const { data: items } = await client.post(`/evaluation-item/bulk-retrieve-to-evaluate/`, ids);
+    console.log("items length: ", items.length);
+
+    console.log("Finished getting detailed items");
+    const payload = items.map((item: any) => {
+      return formatEvaluationItem(item);
+    });
+    const response = await client.patch(`/evaluation-item/bulk-update/`, payload);
+    console.log("response: ", response.data?.length);
+    return response.data;
+  } catch (error) {
+    console.log("error: ", error);
+    console.log(`🤖 Error evaluating list ${evaluationItems[0]?.evaluation_list}. Retrying...`);
+    throw error;
+  }
+}
+
 async function evaluateItems() {
   await sendMessageToSlackChannel(
     slackChannel,
@@ -122,77 +158,95 @@ async function evaluateItems() {
     activeLists.length ? listMessage : "🤖 Não existem listas para avaliar."
   );
 
-  const listChunks = chunk(activeLists, 2);
   const evaluated = new Set();
   const notEvaluated = new Set();
 
-  const intervalRef = setInterval(async () => {
-    // NOTE: It takes between 5-10s for the message to be sent to Slack, so the interval
-    // should consider it.
-    await sendMessageToSlackChannel(
-      slackChannel,
-      `🤖 *Progresso*:
-    - Já foram avaliados ${evaluated.size + notEvaluated.size} itens
-    - Itens que foram aprovados: ${evaluated.size}
-    - Itens que não puderam ser aprovados: ${notEvaluated.size}
-    `
+  // const intervalRef = setInterval(async () => {
+  //   // NOTE: It takes between 5-10s for the message to be sent to Slack, so the interval
+  //   // should consider it.
+  //   await sendMessageToSlackChannel(
+  //     slackChannel,
+  //     `🤖 *Progresso*:
+  //   - Já foram avaliados ${evaluated.size + notEvaluated.size} itens
+  //   - Itens que foram aprovados: ${evaluated.size}
+  //   - Itens que não puderam ser aprovados: ${notEvaluated.size}
+  //   `
+  //   );
+  // }, 10_000);
+
+  const listChunks = chunk(activeLists, 4);
+  for (const listChunk of listChunks) {
+    await Promise.allSettled(
+      listChunk.map(async (list: any) => {
+        console.log(`Evaluating list ${list.id}`);
+        const start = new Date().getTime();
+        const { items } = await getEvaluationItems(list.id);
+
+        const filtered = items.filter((item: any) => item.status === 3);
+        console.log(`Evaluating ${filtered?.length} items for list ${list.id}`);
+        await approveBulk(filtered);
+        const end = new Date().getTime();
+        console.log(`List ${list.id} evaluated in ${+((end - start) / 1000).toFixed(2)}s`);
+        await new Promise((resolve) => setTimeout(resolve, 1_500));
+      })
     );
-  }, 10_000);
-
-  for (const list of activeLists) {
-    // for (const list of listChunk) {
-    console.log(`Evaluating list ${list.id}`);
-    const { items } = await getEvaluationItems(list.id);
-    console.log(`Evaluating ${items?.length} items`);
-    const filtered = items.filter((item: any) => item.status === 3);
-
-    const itemsChunks: any[] = chunk(filtered as any[], 10);
-    for (const itemChunk of itemsChunks) {
-      await Promise.allSettled(
-        itemChunk.map(async (evaluationItem: any) => {
-          const evaluationItemDetails = await getEvaluationItemDetails(evaluationItem.id);
-          const evaluatedItem = await approveItem(evaluationItemDetails);
-          if (evaluatedItem) {
-            console.log(`Evaluated item ${evaluatedItem.id}.`);
-            evaluated.add(evaluationItem.id);
-          } else {
-            notEvaluated.add(evaluationItem.id);
-          }
-          await new Promise((resolve) => setTimeout(resolve, 300));
-        })
-      );
-    }
-    // }
-    // await Promise.allSettled(
-    //   listChunk.map(async (list: any) => {
-    //     console.log(`Evaluating list ${list.id}`);
-    //     const { items } = await getEvaluationItems(list.id);
-    //     console.log(`Evaluating ${items?.length} items`);
-
-    //     const itemsChunks: any[] = chunk(items as any[], 5);
-    //     for (const itemChunk of itemsChunks) {
-    //       await Promise.allSettled(
-    //         itemChunk.map(async (evaluationItem: any) => {
-    //           const evaluationItemDetails = await getEvaluationItemDetails(evaluationItem.id);
-    //           const evaluatedItem = await approveItem(evaluationItemDetails);
-    //           if (evaluatedItem) {
-    //             console.log(`Evaluated item ${evaluatedItem.id}.`);
-    //             evaluated.add(evaluationItem.id);
-    //           } else {
-    //             notEvaluated.add(evaluationItem.id);
-    //           }
-    //           await new Promise((resolve) => setTimeout(resolve, 300));
-    //         })
-    //       );
-    //     }
-    //   })
-    // );
   }
-  clearInterval(intervalRef);
+  // for (const list of activeLists.reverse()) {
+  //   // for (const list of listChunk) {
+  //   console.log(`Evaluating list ${list.id}`);
+  //   const { items } = await getEvaluationItems(list.id);
+
+  //   const filtered = items.filter((item: any) => item.status === 3);
+  //   console.log(`Evaluating ${filtered?.length} items for list ${list.id}`);
+  //   await approveBulk(filtered);
+  //   await new Promise((resolve) => setTimeout(resolve, 1_500));
+  //   // const itemsChunks: any[] = chunk(filtered as any[], 10);
+  //   // for (const itemChunk of itemsChunks) {
+  //   //   await Promise.allSettled(
+  //   //     itemChunk.map(async (evaluationItem: any) => {
+  //   // const evaluationItemDetails = await getEvaluationItemDetails(evaluationItem.id);
+  //   //       const evaluatedItem = await approveItem(evaluationItemDetails);
+  //   //       if (evaluatedItem) {
+  //   //         console.log(`Evaluated item ${evaluatedItem.id}.`);
+  //   //         evaluated.add(evaluationItem.id);
+  //   //       } else {
+  //   //         notEvaluated.add(evaluationItem.id);
+  //   //       }
+  //   //       await new Promise((resolve) => setTimeout(resolve, 300));
+  //   //     })
+  //   //   );
+  //   // }
+  //   // }
+  //   // await Promise.allSettled(
+  //   //   listChunk.map(async (list: any) => {
+  //   //     console.log(`Evaluating list ${list.id}`);
+  //   //     const { items } = await getEvaluationItems(list.id);
+  //   //     console.log(`Evaluating ${items?.length} items`);
+
+  //   //     const itemsChunks: any[] = chunk(items as any[], 5);
+  //   //     for (const itemChunk of itemsChunks) {
+  //   //       await Promise.allSettled(
+  //   //         itemChunk.map(async (evaluationItem: any) => {
+  //   //           const evaluationItemDetails = await getEvaluationItemDetails(evaluationItem.id);
+  //   //           const evaluatedItem = await approveItem(evaluationItemDetails);
+  //   //           if (evaluatedItem) {
+  //   //             console.log(`Evaluated item ${evaluatedItem.id}.`);
+  //   //             evaluated.add(evaluationItem.id);
+  //   //           } else {
+  //   //             notEvaluated.add(evaluationItem.id);
+  //   //           }
+  //   //           await new Promise((resolve) => setTimeout(resolve, 300));
+  //   //         })
+  //   //       );
+  //   //     }
+  //   //   })
+  //   // );
+  // }
+  // clearInterval(intervalRef);
   await sendMessageToSlackChannel(
     slackChannel,
     `${new Date().toISOString()}\n🤖 Todas as listas atribuídas para mim foram avaliadas.`
-  );
+  ).catch((e) => console.log("could not notify slack"));
   console.log("finished");
 }
 
@@ -214,7 +268,7 @@ async function startEvaluation(force: boolean = false) {
     await sendMessageToSlackChannel(
       slackChannel,
       `${new Date().toISOString()}\n🤖 Já estou avaliando itens para pesquisas internas de GPA.`
-    );
+    ).catch((e) => console.log("could not notify slack"));
   } else {
     await db.push("/crawlerState", CrawlerState.RUNNING);
     try {
