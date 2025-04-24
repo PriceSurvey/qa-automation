@@ -1,6 +1,6 @@
 import "dotenv/config";
 import express from "express";
-import { startEvaluation } from "./qa-functions";
+import { startEvaluation } from "./qa-functions-v2";
 import { isAuth } from "./auth";
 // import { db } from "./db";
 import { db } from "./db";
